@@ -28,6 +28,103 @@ double activationFunction(double x) {
     return 1 / (1 + exp(-x));
 }
 
+void moveImage(std::vector<double> &inputs, sf::Vector2f offset) {
+    std::vector<double> output(784, 0);
+
+    for (int x = 0; x < 28; x++)
+    {
+        for (int y = 0; y < 28; y++)
+        {
+
+            if ((x + offset.x) < 0 || (x + offset.x) > 27 || (y + offset.y) < 0 || (y + offset.y) > 27) {
+                continue;
+            }
+
+            output[(x + offset.x) + (y + offset.y) * 28] = inputs[x + y * 28];
+
+        }
+    }
+    inputs = output;
+}
+
+void rotateImage(std::vector<double> inputs, float deg) {
+    std::vector<double> output(784, 0);
+    sf::Vector2f offset = { -14, -14 };
+
+
+    for (int x = 0; x < 28; x++)
+    {
+        for (int y = 0; y < 28; y++)
+        {
+            double newX = cos(deg) * (x + offset.x) + -sin(deg) * (y + offset.y);
+            double newY = sin(deg) * (x + offset.x) + cos(deg) * (y + offset.y);
+
+            newX -= offset.x;
+            newY -= offset.y;
+
+            if (newX > 27 || newX < 0 || newY > 27 || newY < 0) {
+                continue;
+            }
+
+            output[std::round(newX) + std::round(newY) * 28] = inputs[x + y * 28];
+
+        }
+    }
+
+}
+
+void resize(std::vector<double>& input, float scaleFactor) {
+
+    std::vector<double> output(784, 0);
+
+    int offset = -14;
+
+    for (int x = 0; x < 28; x += 1)
+    {
+        for (int y = 0; y < 28; y += 1)
+        {
+
+            float dX = (x + offset) * scaleFactor;
+            float dY = (y + offset) * scaleFactor;
+
+            float d1 = std::round(dX) - offset;
+            float d2 = std::round(dY) - offset;
+
+
+            if (d1 < 0 || d1 >= 28 || d2 < 0 || d2 >= 28) {
+                continue;
+            }
+
+            output[d1 + d2 * 28] = input[x + y * 28];
+
+            //output[(x * reSize + 14 * reSize) + (y * reSize + 14 * reSize) * 28] = avgColor;
+
+        }
+    }
+    input = output;
+}
+
+
+void randomizeImage(std::vector<double>& inputs) {
+
+    float randomFactor = (rand() % 7);
+
+    float sizeFactor = 0.4 + randomFactor / 10;
+
+    resize(inputs, sizeFactor);
+
+    int moveFactor = (1 - sizeFactor) * 40;
+
+    if (moveFactor == 0) {
+        return;
+    }
+
+    float halfMoveFactor = moveFactor / 2;
+
+    moveImage(inputs, { rand() % moveFactor - halfMoveFactor, rand() % moveFactor - halfMoveFactor });
+}
+
+
 class Layer {
 
     int numNodesIn;
@@ -165,9 +262,11 @@ class neuralNetwork {
         int amountOfLayers;
         int batchAmount = 600;
         int batchSize = 100;
-        int epochs = 10;
-        double learn_rate = 1;
-        double momentum_rate = 0.8;
+        int testSize = 500;
+        int epochs = 30;
+        double learn_rate = 0.45;
+        double momentum_rate = 0.7; // 0.9 optimal
+
         const int numThreads = 4;  // Number of threads to use
 
     public:
@@ -182,13 +281,13 @@ class neuralNetwork {
             }
         }
 
-        void test(unsigned char** imageData, unsigned char* labelData) {
+        void test(unsigned char** &imageData, unsigned char* &labelData) {
 
             float amountCorrect = 0;
             float amountChecked = 0;
-            std::vector<double> input(784);
+            std::vector<double> input(784,0);
 
-            for (int i = 0; i < 1000; i++) {
+            for (int i = 0; i < testSize; i++) {
 
                 int label = static_cast<int>(labelData[i]);
 
@@ -197,10 +296,12 @@ class neuralNetwork {
                     input[j] = static_cast<double>(imageData[i][j]) / 255;
                 }
 
+                randomizeImage(input);
 
                 if (classify(input) == label) {
                     amountCorrect++;
                 }
+                
                 amountChecked++;
 
             }
@@ -208,9 +309,11 @@ class neuralNetwork {
             float accuracy = (amountCorrect / amountChecked) * 100;
 
             std::cout << (amountCorrect) << "/" << amountChecked << " Correct\n";
-            std::cout << accuracy << "% Accuracy\n";
+            std::cout << "Accuracy : " << accuracy << "%\n";
 
         };
+
+
 
         void updateGradients(std::vector<double>& inputs, double labelIndex) {
             classify(inputs);
@@ -258,7 +361,6 @@ class neuralNetwork {
 
                 for (int i = 0; i < currentLayer.biases.size(); i++)
                 {
-
                     currentLayer.biases[i] += currentLayer.gradientBiases[i] * scaleFactor;
                     currentLayer.gradientBiases[i] = 0;
                 }
@@ -284,6 +386,8 @@ class neuralNetwork {
                             input[i] = static_cast<double>(imageData[index][i]) / 255;
                         }
 
+                        randomizeImage(input);
+
                         double label = static_cast<double>(labelData[index]);
 
                         updateGradients(input, label);
@@ -292,11 +396,11 @@ class neuralNetwork {
 
                     applyGradients();
                 }
-                
                 std::cout << "Epoch : " << epoch << " : TIME : " << clock.restart().asSeconds() << '\n';
                 test(imageData, labelData);
+                clock.restart().asSeconds();
             }
-            
+
         }
 
 
@@ -374,10 +478,12 @@ void loadNetFromFile(neuralNetwork* network) {
         file.close(); //close the file object.
     }
 
+    std::cout << "Successfully loaded file" << "\n" << "\n";
+
 }
 
 void saveNetToFile(neuralNetwork* network) {
-    std::ofstream fw("C:\\Users\\theow\\source\\repos\\ai_machine_learning\\ai_machine_learning\\networkWeights.txt", std::ofstream::out);
+    std::ofstream fw("C:\\Users\\theow\\source\\repos\\newAItest\\newAItest\\networkWeights.txt", std::ofstream::out);
 
     if (fw.is_open()) {
 
@@ -406,16 +512,50 @@ void saveNetToFile(neuralNetwork* network) {
         fw << 'n';
 
     }
-    else std::cout << "Problem with opening file";
+    else {
+        std::cout << "Problem with opening file";
+        return;
+         };
+
+    std::cout << "\n" << "Successfully saved to file" << "\n";
 
 }
 
+void drawImage(std::vector<double> &number, sf::RenderWindow* _window) {
+
+    sf::VertexArray rectangle;
+    rectangle.setPrimitiveType(sf::Quads);
+    rectangle.resize(28 * 28 * 4);
+
+    sf::Color color = sf::Color::Black;
+
+    for (int x = 0; x < 28; x += 1)
+    {
+        for (int y = 0; y < 28; y += 1)
+        {
+            sf::Vertex* quad = &rectangle[(x + y * 28) * 4];
+
+            sf::Color color = sf::Color(number[x + y * 28], number[x + y * 28], number[x + y * 28]);
+
+            quad[1].position = sf::Vector2f(x * 28, y * 28);
+            quad[1].color = color;
+            quad[0].position = sf::Vector2f(x * 28, y * 28 + 28);
+            quad[0].color = color;
+            quad[2].position = sf::Vector2f(x * 28 + 28, y * 28);
+            quad[2].color = color;
+            quad[3].position = sf::Vector2f(x * 28 + 28, y * 28 + 28);
+            quad[3].color = color;
+        }
+    }
+    _window->draw(rectangle);
+}
 
 int main()
 {
     srand(time(NULL));
+    sf::RenderWindow window({784, 784 }, "");
 
-    neuralNetwork network({784,16,10});
+    neuralNetwork network({784,200,10});
 
     unsigned char** imageSet = read_mnist_images("train-images.idx3-ubyte", 60000);
     unsigned char* labelSet = read_mnist_labels("train-labels.idx1-ubyte", 60000);
@@ -423,11 +563,80 @@ int main()
     unsigned char** testImageSet = read_mnist_images("t10k-images.idx3-ubyte", 10000);
     unsigned char* testLabelSet = read_mnist_labels("t10k-labels.idx1-ubyte", 10000);
 
-    //loadNetFromFile(&network);
 
-    network.learn(imageSet, labelSet);
+
+    loadNetFromFile(&network);
+    
+    //network.learn(imageSet, labelSet);
 
     //saveNetToFile(&network);
+    
+
+    std::vector<double> drawedNumber(784, 0);
+
+
+
+    sf::Clock clock;
+    while (window.isOpen())
+    {
+        float currentTime = clock.restart().asSeconds();
+        float fps = 1.f / (currentTime);
+        float dT = 1000 / fps;
+
+        window.setTitle(std::to_string(fps));
+
+        sf::Event event;
+        while (window.pollEvent(event))
+        {
+            if (event.type == sf::Event::Closed)
+                window.close();
+
+            if (event.type == sf::Event::MouseButtonReleased) {
+                system("cls");
+                network.classify(drawedNumber);
+
+
+                std::cout << std::fixed << std::setprecision(0) << "0 : " << network.layers[1].outputValues[0] * 100 << "%\n";
+                std::cout << "1 : " << network.layers[1].outputValues[1] * 100 << "%\n";
+                std::cout << "2 : " << network.layers[1].outputValues[2] * 100 << "%\n";
+                std::cout << "3 : " << network.layers[1].outputValues[3] * 100 << "%\n";
+                std::cout << "4 : " << network.layers[1].outputValues[4] * 100 << "%\n";
+                std::cout << "5 : " << network.layers[1].outputValues[5] * 100 << "%\n";
+                std::cout << "6 : " << network.layers[1].outputValues[6] * 100 << "%\n";
+                std::cout << "7 : " << network.layers[1].outputValues[7] * 100 << "%\n";
+                std::cout << "8 : " << network.layers[1].outputValues[8] * 100 << "%\n";
+                std::cout << "9 : " << network.layers[1].outputValues[9] * 100 << "%\n";
+
+                std::cout << "Guess : " << network.classify(drawedNumber) << "\n";
+            }
+
+            if (event.type == sf::Event::KeyPressed) {
+                if (event.key.code == sf::Keyboard::Escape) {
+                    window.close();
+                }
+
+                if (event.key.code == sf::Keyboard::Space) {
+                    std::fill(drawedNumber.begin(), drawedNumber.end(), 0);
+                }
+
+
+            }
+        }
+
+        if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+            int x = sf::Mouse::getPosition(window).x / 28;
+            int y = sf::Mouse::getPosition(window).y / 28;
+
+            if (x > 0 && x < 28 && y > 0 && y < 28) {
+                drawedNumber[x + y * 28] = 255;
+            }
+        }
+
+        window.clear();
+        drawImage(drawedNumber, &window);
+        window.display();
+
+    }
 
     return 0;
 }
